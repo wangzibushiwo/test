@@ -1,0 +1,131 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import GridSearchCV, train_test_split
+import matplotlib.pyplot as plt
+
+def read_data(file_path):
+    """从Excel中读取数据"""
+    data = pd.read_excel(file_path, header=0)
+    X = data.iloc[1:, 0:12].values  # 获取输入数据X
+    Y = data.iloc[1:, 12:18].values  # 获取输出数据Y
+    return X, Y
+
+def split_data(X, Y, train_size):
+    """划分数据集为训练集和验证集"""
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, train_size=train_size, random_state=42)
+    return X_train, Y_train, X_test, Y_test
+
+def optimize_params(X_train, Y_train, X_test, Y_test):
+    """使用循环方法优化随机森林算法回归的超参数"""
+    n_estimators = [int(x) for x in np.linspace(start=100, stop=1000, num=10)]  # 设置决策树数量的候选值
+    max_features = ['auto', 'sqrt']  # 设置最大特征数的候选值
+    max_depth = [int(x) for x in np.linspace(10, 110, num=11)]  # 设置决策树深度的候选值
+    max_depth.append(None)
+    min_samples_split = [2, 5, 10]  # 设置子节点最小样本数的候选值
+    min_samples_leaf = [1, 2, 4]  # 设置叶子节点最小样本数的候选值
+
+    # 将超参数放入字典中，以便GridSearchCV函数使用
+    grid_params = {'n_estimators': n_estimators,
+                   'max_features': max_features,
+                   'max_depth': max_depth,
+                   'min_samples_split': min_samples_split,
+                   'min_samples_leaf': min_samples_leaf}
+
+    # 初始化模型和评分方法
+    rf = RandomForestRegressor(random_state=42)
+    scoring = {'MAE': 'neg_mean_absolute_error',
+               'RMSE': 'neg_root_mean_squared_error',
+               'R2': 'r2'}
+
+    # 使用GridSearchCV函数进行交叉验证和超参数优化
+    grid_rf = GridSearchCV(estimator=rf, param_grid=grid_params, scoring=scoring, refit='MAE', cv=5, n_jobs=-1)
+    grid_rf.fit(X_train, Y_train)
+
+    # 获取最优超参数和对应的MAE、RMSE、R2评分指标
+    best_params = grid_rf.best_params_
+    best_mae = -1 * grid_rf.best_score_['MAE']
+    best_rmse = -1 * grid_rf.best_score_['RMSE']
+    best_r2 = grid_rf.best_score_['R2']
+
+    return best_params, best_mae, best_rmse, best_r2
+
+def train_and_evaluate(X_train, Y_train, X_test, Y_test, best_params):
+    """训练随机森林回归模型，并计算在训练集和验证集上的MAE、RMSE、R2评分指标"""
+    model = RandomForestRegressor(**best_params)
+    model.fit(X_train, Y_train)
+
+    # 在训练集和验证集上进行预测，并计算MAE、RMSE、R2评分指标
+    Y_train_pred = model.predict(X_train)
+    Y_test_pred = model.predict(X_test)
+    train_mae = mean_absolute_error(Y_train, Y_train_pred)
+    test_mae = mean_absolute_error(Y_test, Y_test_pred)
+    train_rmse = np.sqrt(mean_squared_error(Y_train, Y_train_pred))
+    test_rmse = np.sqrt(mean_squared_error(Y_test, Y_test_pred))
+    train_r2 = r2_score(Y_train, Y_train_pred)
+    test_r2 = r2_score(Y_test, Y_test_pred)
+
+    return model
+
+def plot_prediction(X_train, Y_train, X_test, Y_test, model):
+    """绘制模型预测Y与训练集/验证集Y之间的散点图，并与1:1直线进行比较"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+
+    # 训练集的散点图
+    ax1.scatter(Y_train, model.predict(X_train), alpha=0.5)
+    ax1.set_xlabel('True values')
+    ax1.set_ylabel('Predicted values')
+    ax1.set_title('Training set')
+
+    # 验证集的散点图
+    ax2.scatter(Y_test, model.predict(X_test), alpha=0.5)
+    ax2.set_xlabel('True values')
+    ax2.set_ylabel('Predicted values')
+    ax2.set_title('Validation set')
+
+    # 绘制1:1直线
+    for ax in [ax1, ax2]:
+        ax.plot(ax.get_xlim(), ax.get_ylim(), ls="--", c=".3")
+
+    plt.tight_layout()
+    plt.show()
+
+def main():
+    """主程序"""
+    # 读取数据
+    file_path = "data.xlsx"
+    X, Y = read_data(file_path)
+
+    # 划分数据集为训练集和验证集
+    train_size = 0.8
+    X_train, Y_train, X_test, Y_test = split_data(X, Y, train_size)
+    print("X_train shape:", X_train.shape)
+    print("Y_train shape:", Y_train.shape)
+    print("X_test shape:", X_test.shape)
+    print("Y_test shape:", Y_test.shape)
+
+    # 优化随机森林算法回归的超参数
+    best_params, best_mae, best_rmse, best_r2 = optimize_params(X_train, Y_train, X_test, Y_test)
+
+    # 训练随机森林回归模型，并计算在训练集和验证集上的MAE、RMSE、R2评分指标
+    model = train_and_evaluate(X_train, Y_train, X_test, Y_test, best_params)
+    train_mae, test_mae, train_rmse, test_rmse, train_r2, test_r2 = \
+        mean_absolute_error(Y_train, model.predict(X_train)), \
+        mean_absolute_error(Y_test, model.predict(X_test)), \
+        np.sqrt(mean_squared_error(Y_train, model.predict(X_train))), \
+        np.sqrt(mean_squared_error(Y_test, model.predict(X_test))), \
+        r2_score(Y_train, model.predict(X_train)), \
+        r2_score(Y_test, model.predict(X_test))
+
+    # 输出最优超参数及其对应的MAE、RMSE、R2评分指标
+    print("Best parameters:", best_params)
+    print("Training set MAE: {:.2f}, RMSE: {:.2f}, R2: {:.2f}".format(train_mae, train_rmse, train_r2))
+    print("Validation set MAE: {:.2f}, RMSE: {:.2f}, R2: {:.2f}".format(test_mae, test_rmse, test_r2))
+    print("Best MAE: {:.2f}, RMSE: {:.2f}, R2: {:.2f}".format(best_mae, best_rmse, best_r2))
+
+    # 绘制模型预测Y与训练集/验证集Y之间的散点图，并与1:1直线进行比较
+    plot_prediction(X_train, Y_train, X_test, Y_test, model)
+
+if __name__ == '__main__':
+    main()
